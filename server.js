@@ -21,7 +21,7 @@ mongoose.connect(process.env.MONGO_URI)
   .then(() => console.log('✅ MongoDB connected'))
   .catch(err => {
     console.error('❌ MongoDB connection FAILED:', err.message);
-    process.exit(1); // server band kar do agar DB connect na ho
+    process.exit(1);
   });
 
 // ─── JWT Middleware ───────────────────────────────────────
@@ -39,6 +39,10 @@ function verifyToken(req, res, next) {
     res.status(401).json({ error: 'Invalid ya expired token' });
   }
 }
+
+// ─── Username Clean Helper ────────────────────────────────
+// trim + lowercase ek jagah define kar diya
+const cleanUsername = (u) => u.trim().toLowerCase();
 
 // ══════════════════════════════════════════════════════════
 //  AUTH ROUTES
@@ -63,21 +67,23 @@ app.post('/api/signup', async (req, res) => {
     return res.status(400).json({ error: 'Please enter Username or password' });
   }
 
-  if (username.trim().length < 3)
+  const finalUsername = cleanUsername(username); // ✅ lowercase ho gaya
+
+  if (finalUsername.length < 3)
     return res.status(400).json({ error: 'Username min should be 3 characters.!' });
 
   if (password.length < 6)
     return res.status(400).json({ error: 'Password min should be 6 characters.!' });
 
   try {
-    const exists = await User.findOne({ username: username.trim() });
+    const exists = await User.findOne({ username: finalUsername });
     if (exists) {
-      console.log('❌ Username already exists:', username);
+      console.log('❌ Username already exists:', finalUsername);
       return res.status(400).json({ error: 'This username already taken.' });
     }
 
     const hash = await bcrypt.hash(password, 10);
-    const newUser = await User.create({ username: username.trim(), password: hash });
+    const newUser = await User.create({ username: finalUsername, password: hash });
     console.log('✅ New user bana:', newUser.username);
 
     res.status(201).json({ message: 'Account Created✅! Pls Sign in.' });
@@ -96,16 +102,18 @@ app.post('/api/signin', async (req, res) => {
   if (!username || !password)
     return res.status(400).json({ error: 'Please enter Username or password' });
 
+  const finalUsername = cleanUsername(username); // ✅ lowercase ho gaya
+
   try {
-    const user = await User.findOne({ username: username.trim() });
+    const user = await User.findOne({ username: finalUsername });
     if (!user) {
-      console.log('❌ User nahi mila:', username);
+      console.log('❌ User nahi mila:', finalUsername);
       return res.status(400).json({ error: 'Username Invalid' });
     }
 
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
-      console.log('❌ Password galat hai for:', username);
+      console.log('❌ Password galat hai for:', finalUsername);
       return res.status(400).json({ error: 'Password Invalid' });
     }
 
