@@ -60,27 +60,27 @@ app.post('/api/signup', async (req, res) => {
 
   if (!username || !password) {
     console.log('❌ Username ya password missing');
-    return res.status(400).json({ error: 'Username aur password dono chahiye' });
+    return res.status(400).json({ error: 'Please enter Username or password' });
   }
 
   if (username.trim().length < 3)
-    return res.status(400).json({ error: 'Username kam se kam 3 characters ka hona chahiye' });
+    return res.status(400).json({ error: 'Username min should be 3 characters.!' });
 
   if (password.length < 6)
-    return res.status(400).json({ error: 'Password kam se kam 6 characters ka hona chahiye' });
+    return res.status(400).json({ error: 'Password min should be 6 characters.!' });
 
   try {
     const exists = await User.findOne({ username: username.trim() });
     if (exists) {
       console.log('❌ Username already exists:', username);
-      return res.status(400).json({ error: 'Ye username already le liya gaya hai' });
+      return res.status(400).json({ error: 'This username already taken.' });
     }
 
     const hash = await bcrypt.hash(password, 10);
     const newUser = await User.create({ username: username.trim(), password: hash });
     console.log('✅ New user bana:', newUser.username);
 
-    res.status(201).json({ message: 'Account ban gaya! Ab sign in karo.' });
+    res.status(201).json({ message: 'Account Created✅! Pls Sign in.' });
   } catch (err) {
     console.error('❌ Signup error:', err.message);
     res.status(500).json({ error: 'Server error: ' + err.message });
@@ -94,19 +94,19 @@ app.post('/api/signin', async (req, res) => {
   const { username, password } = req.body;
 
   if (!username || !password)
-    return res.status(400).json({ error: 'Username aur password chahiye' });
+    return res.status(400).json({ error: 'Please enter Username or password' });
 
   try {
     const user = await User.findOne({ username: username.trim() });
     if (!user) {
       console.log('❌ User nahi mila:', username);
-      return res.status(400).json({ error: 'Ye username exist nahi karta' });
+      return res.status(400).json({ error: 'Username Invalid' });
     }
 
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
       console.log('❌ Password galat hai for:', username);
-      return res.status(400).json({ error: 'Password galat hai' });
+      return res.status(400).json({ error: 'Password Invalid' });
     }
 
     const token = jwt.sign(
@@ -136,7 +136,7 @@ app.get('/api/shayaris', async (req, res) => {
     res.json(shayaris);
   } catch (err) {
     console.error('❌ Get shayaris error:', err.message);
-    res.status(500).json({ error: 'Shayaris load nahi huin' });
+    res.status(500).json({ error: 'Shayaris not loaded' });
   }
 });
 
@@ -147,7 +147,7 @@ app.get('/api/my-shayaris', verifyToken, async (req, res) => {
     res.json(shayaris);
   } catch (err) {
     console.error('❌ My shayaris error:', err.message);
-    res.status(500).json({ error: 'Tumhari shayaris load nahi huin' });
+    res.status(500).json({ error: 'Your Shayaris not loaded' });
   }
 });
 
@@ -155,7 +155,7 @@ app.get('/api/my-shayaris', verifyToken, async (req, res) => {
 app.post('/api/shayaris', verifyToken, async (req, res) => {
   const { content } = req.body;
   if (!content || content.trim() === '')
-    return res.status(400).json({ error: 'Shayari ka content empty nahi ho sakta' });
+    return res.status(400).json({ error: 'Please Enter Shayari' });
 
   try {
     const shayari = await Shayari.create({ content: content.trim(), author: req.user.id });
@@ -172,12 +172,12 @@ app.post('/api/shayaris', verifyToken, async (req, res) => {
 app.put('/api/shayaris/:id', verifyToken, async (req, res) => {
   const { content } = req.body;
   if (!content || content.trim() === '')
-    return res.status(400).json({ error: 'Content empty nahi ho sakta' });
+    return res.status(400).json({ error: 'Please Enter Shayari' });
 
   try {
     const shayari = await Shayari.findOne({ _id: req.params.id, author: req.user.id });
     if (!shayari)
-      return res.status(404).json({ error: 'Shayari nahi mili ya tumhari nahi hai' });
+      return res.status(404).json({ error: 'Shayari Not found' });
 
     shayari.content = content.trim();
     await shayari.save();
@@ -185,7 +185,7 @@ app.put('/api/shayaris/:id', verifyToken, async (req, res) => {
     res.json({ message: 'Shayari update ho gayi!', shayari });
   } catch (err) {
     console.error('❌ Edit error:', err.message);
-    res.status(500).json({ error: 'Update nahi hua' });
+    res.status(500).json({ error: 'Not Update' });
   }
 });
 
@@ -194,13 +194,13 @@ app.delete('/api/shayaris/:id', verifyToken, async (req, res) => {
   try {
     const result = await Shayari.deleteOne({ _id: req.params.id, author: req.user.id });
     if (result.deletedCount === 0)
-      return res.status(404).json({ error: 'Shayari nahi mili ya tumhari nahi hai' });
+      return res.status(404).json({ error: 'Shayari Not found' });
 
     console.log('✅ Shayari delete hui:', req.params.id);
-    res.json({ message: 'Shayari delete ho gayi!' });
+    res.json({ message: 'Deleted Successfully✅.!' });
   } catch (err) {
     console.error('❌ Delete error:', err.message);
-    res.status(500).json({ error: 'Delete nahi hua' });
+    res.status(500).json({ error: 'Not Delete' });
   }
 });
 
