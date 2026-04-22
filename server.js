@@ -1,41 +1,37 @@
 const express = require('express');
-const bcrypt = require('bcryptjs');
-const jwt = require('jsonwebtoken');
-const cors = require('cors');
-const crypto = require('crypto');
-const dns = require("dns");
-
-dns.setServers([
-  '1.1.1.1',
-  '8.8.8.8'
-]);
+const bcrypt   = require('bcryptjs');
+const jwt      = require('jsonwebtoken');
+const cors     = require('cors');
+const crypto   = require('crypto');
 require('dotenv').config();
 
-
-
-const User = require('./models/User');
+const User    = require('./models/User');
 const Shayari = require('./models/Shayari');
-const { sendUsernameMail, sendResetMail } = require('./utils/sendEmail');
+const { sendOtpMail, sendResetMail, sendUsernameMail } = require('./utils/sendEmail');
 
-const app = express();
+const app        = express();
 const JWT_SECRET = process.env.JWT_SECRET || 'shayari_secret_key';
 
 // ─── Middleware ───────────────────────────────────────────
 app.use(cors());
 app.use(express.json());
+app.use(express.urlencoded({ extended: true })); // HTML form ke liye
 
 // ─── MongoDB ──────────────────────────────────────────────
 const mongoose = require('mongoose');
 mongoose.connect(process.env.MONGO_URI)
   .then(() => console.log('✅ MongoDB connected'))
-  .catch(err => {
-    console.error('❌ MongoDB FAILED:', err.message);
-    process.exit(1);
-  });
+  .catch(err => { console.error('❌ MongoDB FAILED:', err.message); process.exit(1); });
 
 // ─── Helpers ──────────────────────────────────────────────
 const cleanUsername = (u) => u.trim().toLowerCase();
 const cleanEmail    = (e) => e.trim().toLowerCase();
+
+// Gmail check — sirf @gmail.com allowed
+const isGmail = (email) => cleanEmail(email).endsWith('@gmail.com');
+
+// 5 digit random OTP
+const generateOtp = () => Math.floor(10000 + Math.random() * 90000).toString();
 
 // ─── JWT Middleware ───────────────────────────────────────
 function verifyToken(req, res, next) {
@@ -45,7 +41,7 @@ function verifyToken(req, res, next) {
   try {
     req.user = jwt.verify(token, JWT_SECRET);
     next();
-  } catch (err) {
+  } catch {
     res.status(401).json({ error: 'Invalid ya expired token' });
   }
 }
@@ -56,7 +52,7 @@ function verifyToken(req, res, next) {
 app.get('/', (req, res) => {
   res.json({
     status: '✅ Server chal raha hai',
-    db: mongoose.connection.readyState === 1 ? '✅ Connected' : '❌ Disconnected'
+    db: mongoose.connection.readyState === 1 ? '✅ Connected' : '❌ Disconnected',
   });
 });
 
@@ -65,8 +61,10 @@ app.get('/', (req, res) => {
 // ══════════════════════════════════════════════════════════
 
 // ── POST /api/signup ──────────────────────────────────────
+// Account banao → OTP bhejo → verify karo
 app.post('/api/signup', async (req, res) => {
   const { username, email, password } = req.body;
+  console.log('📩 Signup:', username, email);
 
   if (!username || !email || !password)
     return res.status(400).json({ error: 'Username, Email aur Password teenon chahiye' });
@@ -74,40 +72,149 @@ app.post('/api/signup', async (req, res) => {
   const u = cleanUsername(username);
   const e = cleanEmail(email);
 
+  // ✅ Sirf Gmail allowed
+  if (!isGmail(e))
+    return res.status(400).json({ error: 'Sirf Gmail (@gmail.com) allowed hai' });
+
   if (u.length < 3)
     return res.status(400).json({ error: 'Username min 3 characters ka hona chahiye' });
-
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e))
-    return res.status(400).json({ error: 'Valid email address daalo' });
 
   if (password.length < 6)
     return res.status(400).json({ error: 'Password min 6 characters ka hona chahiye' });
 
   try {
-    const existingUser = await User.findOne({ username: u });
-    if (existingUser)
+    // Check karo pehle se exist karta hai
+    const existUser  = await User.findOne({ username: u });
+    if (existUser)
       return res.status(400).json({ error: 'Ye username already le liya gaya hai' });
 
-    const existingEmail = await User.findOne({ email: e });
-    if (existingEmail)
+    const existEmail = await User.findOne({ email: e });
+
+    // Agar email hai lekin verify nahi — OTP dobara bhejo
+    if (existEmail && !existEmail.isVerified) {
+      const otp    = generateOtp();
+      const expiry = new Date(Date.now() + 10 * 60 * 1000);
+      existEmail.otp       = otp;
+      existEmail.otpExpiry = expiry;
+      existEmail.username  = u; // username update karo agar naya dala
+      await existEmail.save();
+      await sendOtpMail(e, u, otp);
+      console.log('📧 OTP dobara bheja:', e, otp);
+      return res.status(200).json({ message: 'OTP dobara bheja gaya!', requiresOtp: true, email: e });
+    }
+
+    if (existEmail)
       return res.status(400).json({ error: 'Ye email already registered hai' });
 
+    // Naya user banao
     const hash = await bcrypt.hash(password, 10);
-    const newUser = await User.create({ username: u, email: e, password: hash });
-    console.log('✅ New user:', newUser.username);
+    const otp    = generateOtp();
+    const expiry = new Date(Date.now() + 10 * 60 * 1000);
 
-    res.status(201).json({ message: 'Account ban gaya! Ab Sign In karo.' });
+    await User.create({
+      username: u,
+      email: e,
+      password: hash,
+      isVerified: false,
+      otp,
+      otpExpiry: expiry,
+    });
+
+    await sendOtpMail(e, u, otp);
+    console.log('✅ User bana, OTP bheja:', u, otp);
+
+    res.status(201).json({
+      message: 'OTP bheja gaya! Email check karo.',
+      requiresOtp: true,
+      email: e,
+    });
   } catch (err) {
     console.error('❌ Signup error:', err.message);
     res.status(500).json({ error: 'Server error: ' + err.message });
   }
 });
 
+// ── POST /api/verify-otp ──────────────────────────────────
+// OTP verify karo → account activate karo
+app.post('/api/verify-otp', async (req, res) => {
+  const { email, otp } = req.body;
+  console.log('📩 OTP verify:', email, otp);
+
+  if (!email || !otp)
+    return res.status(400).json({ error: 'Email aur OTP chahiye' });
+
+  try {
+    const user = await User.findOne({ email: cleanEmail(email) });
+
+    if (!user)
+      return res.status(404).json({ error: 'User nahi mila' });
+
+    if (user.isVerified)
+      return res.status(400).json({ error: 'Email pehle se verify hai' });
+
+    if (!user.otp || !user.otpExpiry)
+      return res.status(400).json({ error: 'OTP nahi mila, dobara signup karo' });
+
+    // OTP expire check
+    if (new Date() > user.otpExpiry)
+      return res.status(400).json({ error: 'OTP expire ho gaya. Dobara signup karo.' });
+
+    // OTP match check
+    if (user.otp !== otp.toString())
+      return res.status(400).json({ error: 'OTP galat hai' });
+
+    // ✅ Verify karo
+    user.isVerified = true;
+    user.otp        = null;
+    user.otpExpiry  = null;
+    await user.save();
+
+    console.log('✅ Email verified:', user.username);
+    res.json({ message: 'Email verify ho gayi! Ab Sign In karo.' });
+  } catch (err) {
+    console.error('❌ OTP verify error:', err.message);
+    res.status(500).json({ error: 'Server error: ' + err.message });
+  }
+});
+
+// ── POST /api/resend-otp ──────────────────────────────────
+// OTP dobara bhejo
+app.post('/api/resend-otp', async (req, res) => {
+  const { email } = req.body;
+
+  if (!email)
+    return res.status(400).json({ error: 'Email chahiye' });
+
+  try {
+    const user = await User.findOne({ email: cleanEmail(email) });
+
+    if (!user)
+      return res.status(404).json({ error: 'User nahi mila' });
+
+    if (user.isVerified)
+      return res.status(400).json({ error: 'Email pehle se verify hai' });
+
+    const otp    = generateOtp();
+    const expiry = new Date(Date.now() + 10 * 60 * 1000);
+    user.otp       = otp;
+    user.otpExpiry = expiry;
+    await user.save();
+
+    await sendOtpMail(user.email, user.username, otp);
+    console.log('📧 OTP resend:', user.email, otp);
+
+    res.json({ message: 'Naya OTP bheja gaya!' });
+  } catch (err) {
+    console.error('❌ Resend OTP error:', err.message);
+    res.status(500).json({ error: 'Server error: ' + err.message });
+  }
+});
+
 // ── POST /api/signin ──────────────────────────────────────
-// Username YA Email dono se login ho sakta hai
+// Username YA Email + Password
 app.post('/api/signin', async (req, res) => {
   const { login, password } = req.body;
-  // login field mein username ya email dono accept karo
+  console.log('📩 Signin:', login);
 
   if (!login || !password)
     return res.status(400).json({ error: 'Username/Email aur Password chahiye' });
@@ -115,13 +222,20 @@ app.post('/api/signin', async (req, res) => {
   const loginClean = login.trim().toLowerCase();
 
   try {
-    // Pehle email se dhundo, phir username se
     const user = await User.findOne({
-      $or: [{ email: loginClean }, { username: loginClean }]
+      $or: [{ email: loginClean }, { username: loginClean }],
     });
 
     if (!user)
       return res.status(400).json({ error: 'Username ya Email galat hai' });
+
+    // ✅ Verify check
+    if (!user.isVerified)
+      return res.status(403).json({
+        error: 'Email verify nahi hui hai',
+        requiresOtp: true,
+        email: user.email,
+      });
 
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch)
@@ -142,42 +256,31 @@ app.post('/api/signin', async (req, res) => {
 });
 
 // ── POST /api/forgot-password ─────────────────────────────
-// Email daalo → username show karo + reset link bhejo
 app.post('/api/forgot-password', async (req, res) => {
   const { email } = req.body;
-
-  if (!email)
-    return res.status(400).json({ error: 'Email daalo' });
-
-  const e = cleanEmail(email);
+  if (!email) return res.status(400).json({ error: 'Email daalo' });
 
   try {
-    const user = await User.findOne({ email: e });
-
-    // Security: chahe user mile ya na mile, same message dikhao
-    // Lekin Flutter mein username bhi dikhana hai, isliye yahan bhejte hain
+    const user = await User.findOne({ email: cleanEmail(email) });
     if (!user)
       return res.status(404).json({ error: 'Is email se koi account nahi mila' });
 
-    // Reset token banao (random 32 bytes)
-    const resetToken = crypto.randomBytes(32).toString('hex');
-    const expiry = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
+    if (!user.isVerified)
+      return res.status(403).json({ error: 'Email verify nahi hui, pehle verify karo' });
 
-    user.resetToken = resetToken;
-    user.resetTokenExpiry = expiry;
+    // Reset token banao
+    const resetToken = crypto.randomBytes(32).toString('hex');
+    user.resetToken       = resetToken;
+    user.resetTokenExpiry = new Date(Date.now() + 15 * 60 * 1000);
     await user.save();
 
     const resetLink = `${process.env.APP_URL}/api/reset-password/${resetToken}`;
-
-    // Email bhejo
     await sendResetMail(user.email, user.username, resetLink);
 
     console.log('✅ Reset email bheja:', user.email);
-
-    // Flutter ko username bhi bhejo taaki screen pe show kar sake
     res.json({
-      message: 'Reset link email pe bhej diya!',
-      username: user.username,   // ← Flutter isko screen pe dikhayega
+      message: 'Password reset link email pe bhej di!',
+      username: user.username,
     });
   } catch (err) {
     console.error('❌ Forgot password error:', err.message);
@@ -185,41 +288,8 @@ app.post('/api/forgot-password', async (req, res) => {
   }
 });
 
-// ── POST /api/reset-password ──────────────────────────────
-// Naya password set karo token se
-app.post('/api/reset-password', async (req, res) => {
-  const { token, newPassword } = req.body;
-
-  if (!token || !newPassword)
-    return res.status(400).json({ error: 'Token aur naya password chahiye' });
-
-  if (newPassword.length < 6)
-    return res.status(400).json({ error: 'Password min 6 characters ka hona chahiye' });
-
-  try {
-    const user = await User.findOne({
-      resetToken: token,
-      resetTokenExpiry: { $gt: new Date() }, // expire nahi hona chahiye
-    });
-
-    if (!user)
-      return res.status(400).json({ error: 'Link invalid ya expire ho gayi. Dobara try karo.' });
-
-    user.password = await bcrypt.hash(newPassword, 10);
-    user.resetToken = null;
-    user.resetTokenExpiry = null;
-    await user.save();
-
-    console.log('✅ Password reset:', user.username);
-    res.json({ message: 'Password reset ho gaya! Ab sign in karo.' });
-  } catch (err) {
-    console.error('❌ Reset password error:', err.message);
-    res.status(500).json({ error: 'Server error: ' + err.message });
-  }
-});
-
-// ── GET /api/reset-password/:token (Web browser ke liye) ──
-// Email ka link click karne par ye page khulega
+// ── GET /api/reset-password/:token ───────────────────────
+// Email ke link se aane par HTML form dikhao
 app.get('/api/reset-password/:token', async (req, res) => {
   const { token } = req.params;
 
@@ -230,72 +300,138 @@ app.get('/api/reset-password/:token', async (req, res) => {
 
   if (!user) {
     return res.send(`
-      <html><body style="font-family:sans-serif;text-align:center;padding:60px">
-        <h2 style="color:red">❌ Link Invalid ya Expire Ho Gayi</h2>
-        <p>App se dobara forgot password try karo.</p>
+      <html><body style="font-family:sans-serif;text-align:center;padding:60px;background:#f9f9f9">
+        <h2 style="color:#e53935">❌ Link Invalid ya Expire Ho Gayi</h2>
+        <p>App se dobara Forgot Password try karo.</p>
       </body></html>
     `);
   }
 
-  // Simple HTML form dikhao
+  // ✅ Token ko form mein hidden field ki jagah URL se pass karo
   res.send(`
+    <!DOCTYPE html>
     <html>
-    <head><title>Reset Password - Shayari App</title></head>
-    <body style="font-family:sans-serif;display:flex;justify-content:center;
-                 align-items:center;min-height:100vh;margin:0;background:#f1f8e9;">
-      <div style="background:white;padding:40px;border-radius:16px;
-                  box-shadow:0 4px 20px rgba(0,0,0,0.1);width:100%;max-width:400px;">
-        <h2 style="color:#2e7d32;text-align:center;">🌿 Shayari App</h2>
-        <h3 style="text-align:center;">Reset Password</h3>
-        <p style="text-align:center;color:#555;">Hello <b>${user.username}</b></p>
-        <form id="f">
-          <input type="hidden" id="token" value="${token}">
-          <div style="margin-bottom:16px;">
-            <label style="display:block;margin-bottom:6px;font-weight:bold;">New Password</label>
-            <input type="password" id="np" placeholder="Min 6 characters"
-              style="width:100%;padding:12px;border:1px solid #ccc;border-radius:8px;
-                     box-sizing:border-box;font-size:15px;">
-          </div>
-          <div style="margin-bottom:24px;">
-            <label style="display:block;margin-bottom:6px;font-weight:bold;">Confirm Password</label>
-            <input type="password" id="cp" placeholder="Dobara daalo"
-              style="width:100%;padding:12px;border:1px solid #ccc;border-radius:8px;
-                     box-sizing:border-box;font-size:15px;">
-          </div>
-          <button onclick="reset()" type="button"
-            style="width:100%;padding:14px;background:#2e7d32;color:white;
-                   border:none;border-radius:8px;font-size:16px;
-                   font-weight:bold;cursor:pointer;">
-            Reset Password
-          </button>
-          <p id="msg" style="text-align:center;margin-top:16px;"></p>
-        </form>
-        <script>
-          async function reset() {
-            const np = document.getElementById('np').value;
-            const cp = document.getElementById('cp').value;
-            const msg = document.getElementById('msg');
-            if (np.length < 6) { msg.style.color='red'; msg.textContent='Min 6 characters chahiye'; return; }
-            if (np !== cp) { msg.style.color='red'; msg.textContent='Dono password match nahi kar rahe'; return; }
-            const res = await fetch('/api/reset-password', {
+    <head>
+      <title>Reset Password — Shayari App</title>
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: sans-serif; background: #f1f8e9;
+               display: flex; justify-content: center; align-items: center;
+               min-height: 100vh; padding: 20px; }
+        .card { background: white; padding: 40px; border-radius: 16px;
+                box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+                width: 100%; max-width: 400px; }
+        h2 { color: #2e7d32; text-align: center; margin-bottom: 4px; }
+        .sub { text-align: center; color: #555; margin-bottom: 24px; font-size: 14px; }
+        label { display: block; font-weight: 600; margin-bottom: 6px; color: #333; }
+        input { width: 100%; padding: 12px 14px; border: 1.5px solid #ccc;
+                border-radius: 8px; font-size: 15px; margin-bottom: 16px;
+                outline: none; transition: border 0.2s; }
+        input:focus { border-color: #2e7d32; }
+        button { width: 100%; padding: 14px; background: #2e7d32; color: white;
+                 border: none; border-radius: 8px; font-size: 16px;
+                 font-weight: bold; cursor: pointer; }
+        button:disabled { background: #aaa; cursor: not-allowed; }
+        #msg { text-align: center; margin-top: 14px; font-size: 14px; min-height: 20px; }
+        .success { color: #2e7d32; font-weight: bold; font-size: 18px;
+                   text-align: center; padding: 20px; }
+      </style>
+    </head>
+    <body>
+      <div class="card">
+        <h2>🌿 Shayari App</h2>
+        <p class="sub">Hello <b>${user.username}</b>, naya password set karo</p>
+
+        <div id="formArea">
+          <label>New Password</label>
+          <input type="password" id="np" placeholder="Min 6 characters">
+
+          <label>Confirm Password</label>
+          <input type="password" id="cp" placeholder="Dobara daalo">
+
+          <button id="btn" onclick="resetPass()">Reset Password</button>
+          <p id="msg"></p>
+        </div>
+      </div>
+
+      <script>
+        async function resetPass() {
+          const np  = document.getElementById('np').value;
+          const cp  = document.getElementById('cp').value;
+          const msg = document.getElementById('msg');
+          const btn = document.getElementById('btn');
+
+          msg.style.color = 'red';
+
+          if (np.length < 6) { msg.textContent = 'Password min 6 characters ka hona chahiye'; return; }
+          if (np !== cp)     { msg.textContent = 'Dono password match nahi kar rahe'; return; }
+
+          btn.disabled    = true;
+          btn.textContent = 'Resetting...';
+
+          try {
+            // ✅ Token URL se aata hai — body mein bhi bhejo
+            const res = await fetch('/api/reset-password/${token}', {
               method: 'POST',
-              headers: {'Content-Type':'application/json'},
-              body: JSON.stringify({ token: '${token}', newPassword: np })
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ newPassword: np })
+              // token URL se server khud uthayega
             });
             const data = await res.json();
+
             if (res.ok) {
-              msg.style.color = 'green';
-              msg.textContent = '✅ ' + data.message;
-              document.getElementById('f').innerHTML = '<p style="color:green;text-align:center;font-size:18px">✅ Password reset ho gaya!<br>App pe jaake sign in karo.</p>';
+              document.getElementById('formArea').innerHTML =
+                '<div class="success">✅ Password reset ho gaya!<br><br>App pe wapas jao aur Sign In karo.</div>';
             } else {
-              msg.style.color = 'red';
               msg.textContent = '❌ ' + data.error;
+              btn.disabled    = false;
+              btn.textContent = 'Reset Password';
             }
+          } catch(e) {
+            msg.textContent = '❌ Network error, dobara try karo';
+            btn.disabled    = false;
+            btn.textContent = 'Reset Password';
           }
-        </script>
-      </div>
-    </body></html>
+        }
+      </script>
+    </body>
+    </html>
   `);
+});
+
+// ── POST /api/reset-password/:token ──────────────────────
+// ✅ FIX: token URL se aata hai body se nahi
+app.post('/api/reset-password/:token', async (req, res) => {
+  const { token }       = req.params;   // URL se token
+  const { newPassword } = req.body;     // body se sirf password
+
+  if (!newPassword)
+    return res.status(400).json({ error: 'Naya password chahiye' });
+
+  if (newPassword.length < 6)
+    return res.status(400).json({ error: 'Password min 6 characters ka hona chahiye' });
+
+  try {
+    const user = await User.findOne({
+      resetToken: token,
+      resetTokenExpiry: { $gt: new Date() },
+    });
+
+    if (!user)
+      return res.status(400).json({ error: 'Link invalid ya expire ho gayi. Dobara try karo.' });
+
+    user.password         = await bcrypt.hash(newPassword, 10);
+    user.resetToken       = null;
+    user.resetTokenExpiry = null;
+    await user.save();
+
+    console.log('✅ Password reset:', user.username);
+    res.json({ message: 'Password reset ho gaya! Ab Sign In karo.' });
+  } catch (err) {
+    console.error('❌ Reset error:', err.message);
+    res.status(500).json({ error: 'Server error: ' + err.message });
+  }
 });
 
 // ══════════════════════════════════════════════════════════
@@ -304,9 +440,7 @@ app.get('/api/reset-password/:token', async (req, res) => {
 
 app.get('/api/shayaris', async (req, res) => {
   try {
-    const shayaris = await Shayari.find()
-      .populate('author', 'username')
-      .sort('-createdAt');
+    const shayaris = await Shayari.find().populate('author', 'username').sort('-createdAt');
     res.json(shayaris);
   } catch (err) {
     res.status(500).json({ error: 'Shayaris not loaded' });
@@ -327,7 +461,7 @@ app.post('/api/shayaris', verifyToken, async (req, res) => {
   if (!content || content.trim() === '')
     return res.status(400).json({ error: 'Please Enter Shayari' });
   try {
-    const shayari = await Shayari.create({ content: content.trim(), author: req.user.id });
+    const shayari  = await Shayari.create({ content: content.trim(), author: req.user.id });
     const populated = await shayari.populate('author', 'username');
     res.status(201).json(populated);
   } catch (err) {
@@ -365,7 +499,7 @@ app.delete('/api/shayaris/:id', verifyToken, async (req, res) => {
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`✅ Server running on port ${PORT}`);
-  console.log(`🔑 JWT_SECRET: ${!!process.env.JWT_SECRET}`);
-  console.log(`🗄️  MONGO_URI: ${!!process.env.MONGO_URI}`);
-  console.log(`📧 EMAIL: ${!!process.env.EMAIL_USER}`);
+  console.log(`🔑 JWT_SECRET : ${!!process.env.JWT_SECRET}`);
+  console.log(`🗄️  MONGO_URI  : ${!!process.env.MONGO_URI}`);
+  console.log(`📧 EMAIL_USER : ${!!process.env.EMAIL_USER}`);
 });
