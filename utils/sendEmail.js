@@ -19,17 +19,17 @@ async function sendOtpMail(toEmail, username, otp) {
                   padding:32px;border-radius:12px;border:1px solid #e0e0e0;">
         <h2 style="color:#2e7d32;margin-bottom:4px;">🌿 Shayari App</h2>
         <p>Hello <b>${username}</b>,</p>
-        <p>Apna email verify karne ke liye neeche diya OTP use karo:</p>
+        <p>To verify your email, use the OTP provided below:</p>
         <div style="font-size:36px;font-weight:bold;color:#2e7d32;letter-spacing:8px;
                     background:#f1f8e9;padding:20px;border-radius:10px;
                     text-align:center;margin:20px 0;">
           ${otp}
         </div>
         <p style="color:#e53935;font-weight:bold;">
-          ⏰ Ye OTP sirf 10 minutes ke liye valid hai.
+          ⏰ This OTP is valid for only 10 minutes.
         </p>
         <p style="color:#777;font-size:13px;">
-          Agar aapne signup nahi kiya toh is email ko ignore karo.
+          If you haven't signed up, please ignore this email.
         </p>
       </div>
     `,
@@ -47,8 +47,8 @@ async function sendResetMail(toEmail, username, resetLink) {
                   padding:32px;border-radius:12px;border:1px solid #e0e0e0;">
         <h2 style="color:#2e7d32;">🌿 Shayari App</h2>
         <p>Hello <b>${username}</b>,</p>
-        <p>Neeche button pe click karke apna password reset karo.<br>
-           Ye link <b>15 minutes</b> mein expire ho jayegi.</p>
+        <p>Reset your password by clicking on the button below.<br>
+           This link will expire in <b>15 minutes</b>.</p>
         <a href="${resetLink}"
            style="display:inline-block;margin-top:16px;padding:14px 28px;
                   background:#2e7d32;color:#fff;border-radius:8px;
@@ -56,7 +56,7 @@ async function sendResetMail(toEmail, username, resetLink) {
           Reset Password
         </a>
         <p style="margin-top:20px;color:#777;font-size:12px;">
-          Agar aapne request nahi ki toh ignore karo.<br>
+          If you didn't make the request, then ignore it.<br>
           Direct link: ${resetLink}
         </p>
       </div>
