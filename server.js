@@ -74,7 +74,7 @@ app.post('/api/signup', async (req, res) => {
 
   // ✅ Sirf Gmail allowed
   if (!isGmail(e))
-    return res.status(400).json({ error: 'Sirf Gmail (@gmail.com) allowed hai' });
+    return res.status(400).json({ error: 'Only Gmail (@gmail.com) allowed' });
 
   if (u.length < 3)
     return res.status(400).json({ error: 'Username min 3 characters ka hona chahiye' });
@@ -86,7 +86,7 @@ app.post('/api/signup', async (req, res) => {
     // Check karo pehle se exist karta hai
     const existUser  = await User.findOne({ username: u });
     if (existUser)
-      return res.status(400).json({ error: 'Ye username already le liya gaya hai' });
+      return res.status(400).json({ error: 'Username Taken' });
 
     const existEmail = await User.findOne({ email: e });
 
@@ -100,11 +100,11 @@ app.post('/api/signup', async (req, res) => {
       await existEmail.save();
       await sendOtpMail(e, u, otp);
       console.log('📧 OTP dobara bheja:', e, otp);
-      return res.status(200).json({ message: 'OTP dobara bheja gaya!', requiresOtp: true, email: e });
+      return res.status(200).json({ message: 'Again OTP Sent!', requiresOtp: true, email: e });
     }
 
     if (existEmail)
-      return res.status(400).json({ error: 'Ye email already registered hai' });
+      return res.status(400).json({ error: 'Email already registered' });
 
     // Naya user banao
     const hash = await bcrypt.hash(password, 10);
@@ -124,7 +124,7 @@ app.post('/api/signup', async (req, res) => {
     console.log('✅ User bana, OTP bheja:', u, otp);
 
     res.status(201).json({
-      message: 'OTP bheja gaya! Email check karo.',
+      message: 'OTP sent! Check your Email.',
       requiresOtp: true,
       email: e,
     });
@@ -141,27 +141,27 @@ app.post('/api/verify-otp', async (req, res) => {
   console.log('📩 OTP verify:', email, otp);
 
   if (!email || !otp)
-    return res.status(400).json({ error: 'Email aur OTP chahiye' });
+    return res.status(400).json({ error: 'Email or OTP needed' });
 
   try {
     const user = await User.findOne({ email: cleanEmail(email) });
 
     if (!user)
-      return res.status(404).json({ error: 'User nahi mila' });
+      return res.status(404).json({ error: 'User not found' });
 
     if (user.isVerified)
-      return res.status(400).json({ error: 'Email pehle se verify hai' });
+      return res.status(400).json({ error: 'Email already verified' });
 
     if (!user.otp || !user.otpExpiry)
-      return res.status(400).json({ error: 'OTP nahi mila, dobara signup karo' });
+      return res.status(400).json({ error: 'Signup Again' });
 
     // OTP expire check
     if (new Date() > user.otpExpiry)
-      return res.status(400).json({ error: 'OTP expire ho gaya. Dobara signup karo.' });
+      return res.status(400).json({ error: 'OTP expired.' });
 
     // OTP match check
     if (user.otp !== otp.toString())
-      return res.status(400).json({ error: 'OTP galat hai' });
+      return res.status(400).json({ error: 'OTP Wrong.' });
 
     // ✅ Verify karo
     user.isVerified = true;
@@ -170,7 +170,7 @@ app.post('/api/verify-otp', async (req, res) => {
     await user.save();
 
     console.log('✅ Email verified:', user.username);
-    res.json({ message: 'Email verify ho gayi! Ab Sign In karo.' });
+    res.json({ message: 'Email verified! Please Sign In.' });
   } catch (err) {
     console.error('❌ OTP verify error:', err.message);
     res.status(500).json({ error: 'Server error: ' + err.message });
@@ -217,7 +217,7 @@ app.post('/api/signin', async (req, res) => {
   console.log('📩 Signin:', login);
 
   if (!login || !password)
-    return res.status(400).json({ error: 'Username/Email aur Password chahiye' });
+    return res.status(400).json({ error: 'Username/Email or Password needed' });
 
   const loginClean = login.trim().toLowerCase();
 
@@ -301,8 +301,8 @@ app.get('/api/reset-password/:token', async (req, res) => {
   if (!user) {
     return res.send(`
       <html><body style="font-family:sans-serif;text-align:center;padding:60px;background:#f9f9f9">
-        <h2 style="color:#e53935">❌ Link Invalid ya Expire Ho Gayi</h2>
-        <p>App se dobara Forgot Password try karo.</p>
+        <h2 style="color:#e53935">❌ Expire/Invalid Link</h2>
+        <p>Try Again Forgot Password.</p>
       </body></html>
     `);
   }
@@ -419,7 +419,7 @@ app.post('/api/reset-password/:token', async (req, res) => {
     });
 
     if (!user)
-      return res.status(400).json({ error: 'Link invalid ya expire ho gayi. Dobara try karo.' });
+      return res.status(400).json({ error: 'Link expire/invalid. try again.' });
 
     user.password         = await bcrypt.hash(newPassword, 10);
     user.resetToken       = null;
