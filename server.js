@@ -67,7 +67,7 @@ app.post('/api/signup', async (req, res) => {
   console.log('📩 Signup:', username, email);
 
   if (!username || !email || !password)
-    return res.status(400).json({ error: 'Username, Email aur Password teenon chahiye' });
+    return res.status(400).json({ error: 'Username, email, and password are required.' });
 
   const u = cleanUsername(username);
   const e = cleanEmail(email);
@@ -77,10 +77,10 @@ app.post('/api/signup', async (req, res) => {
     return res.status(400).json({ error: 'Only Gmail (@gmail.com) allowed' });
 
   if (u.length < 3)
-    return res.status(400).json({ error: 'Username min 3 characters ka hona chahiye' });
+    return res.status(400).json({ error: 'Username min should be 3 characters.' });
 
   if (password.length < 6)
-    return res.status(400).json({ error: 'Password min 6 characters ka hona chahiye' });
+    return res.status(400).json({ error: 'Password min should be 6 characters.' });
 
   try {
     // Check karo pehle se exist karta hai
@@ -189,10 +189,10 @@ app.post('/api/resend-otp', async (req, res) => {
     const user = await User.findOne({ email: cleanEmail(email) });
 
     if (!user)
-      return res.status(404).json({ error: 'User nahi mila' });
+      return res.status(404).json({ error: 'User Not Found' });
 
     if (user.isVerified)
-      return res.status(400).json({ error: 'Email pehle se verify hai' });
+      return res.status(400).json({ error: 'Email Already verified' });
 
     const otp    = generateOtp();
     const expiry = new Date(Date.now() + 10 * 60 * 1000);
@@ -203,7 +203,7 @@ app.post('/api/resend-otp', async (req, res) => {
     await sendOtpMail(user.email, user.username, otp);
     console.log('📧 OTP resend:', user.email, otp);
 
-    res.json({ message: 'Naya OTP bheja gaya!' });
+    res.json({ message: 'New OTP Sent!' });
   } catch (err) {
     console.error('❌ Resend OTP error:', err.message);
     res.status(500).json({ error: 'Server error: ' + err.message });
@@ -227,19 +227,19 @@ app.post('/api/signin', async (req, res) => {
     });
 
     if (!user)
-      return res.status(400).json({ error: 'Username ya Email galat hai' });
+      return res.status(400).json({ error: 'Username/Email Wrong' });
 
     // ✅ Verify check
     if (!user.isVerified)
       return res.status(403).json({
-        error: 'Email verify nahi hui hai',
+        error: 'This email is not verified.',
         requiresOtp: true,
         email: user.email,
       });
 
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch)
-      return res.status(400).json({ error: 'Password galat hai' });
+      return res.status(400).json({ error: 'Password Wrong' });
 
     const token = jwt.sign(
       { id: user._id, username: user.username },
@@ -341,7 +341,7 @@ app.get('/api/reset-password/:token', async (req, res) => {
     <body>
       <div class="card">
         <h2>🌿 Shayari App</h2>
-        <p class="sub">Hello <b>${user.username}</b>, naya password set karo</p>
+        <p class="sub">Hello <b>${user.username}</b>, set your new password.</p>
 
         <div id="formArea">
           <label>New Password</label>
@@ -364,8 +364,8 @@ app.get('/api/reset-password/:token', async (req, res) => {
 
           msg.style.color = 'red';
 
-          if (np.length < 6) { msg.textContent = 'Password min 6 characters ka hona chahiye'; return; }
-          if (np !== cp)     { msg.textContent = 'Dono password match nahi kar rahe'; return; }
+          if (np.length < 6) { msg.textContent = 'Password min should be 6 characters.'; return; }
+          if (np !== cp)     { msg.textContent = 'Password mismatch'; return; }
 
           btn.disabled    = true;
           btn.textContent = 'Resetting...';
@@ -382,7 +382,7 @@ app.get('/api/reset-password/:token', async (req, res) => {
 
             if (res.ok) {
               document.getElementById('formArea').innerHTML =
-                '<div class="success">✅ Password reset ho gaya!<br><br>App pe wapas jao aur Sign In karo.</div>';
+                '<div class="success">✅ Password reset successfully!<br><br>Go back to the app and sign in.</div>';
             } else {
               msg.textContent = '❌ ' + data.error;
               btn.disabled    = false;
@@ -427,7 +427,7 @@ app.post('/api/reset-password/:token', async (req, res) => {
     await user.save();
 
     console.log('✅ Password reset:', user.username);
-    res.json({ message: 'Password reset ho gaya! Ab Sign In karo.' });
+    res.json({ message: 'Password reset successfully! Pls Sign In.' });
   } catch (err) {
     console.error('❌ Reset error:', err.message);
     res.status(500).json({ error: 'Server error: ' + err.message });
