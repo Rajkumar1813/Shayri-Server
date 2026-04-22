@@ -6,18 +6,39 @@ const userSchema = new mongoose.Schema({
     required: true,
     unique: true,
     trim: true,
-    lowercase: true,   // ✅ save hone se pehle automatically lowercase ho jayega
+    lowercase: true,
+  },
+  email: {
+    type: String,
+    required: true,
+    unique: true,
+    trim: true,
+    lowercase: true,
   },
   password: {
     type: String,
-    required: true
-  }
-});
+    required: true,
+  },
+  // Password reset ke liye
+  resetToken: {
+    type: String,
+    default: null,
+  },
+  resetTokenExpiry: {
+    type: Date,
+    default: null,
+  },
+}, { timestamps: true });
 
-// ✅ Case-insensitive unique index
-// "Rahul", "RAHUL", "rahul" — teeno ek hi maane jayenge
+// Case-insensitive unique index username ke liye
 userSchema.index(
   { username: 1 },
+  { unique: true, collation: { locale: 'en', strength: 2 } }
+);
+
+// Case-insensitive unique index email ke liye
+userSchema.index(
+  { email: 1 },
   { unique: true, collation: { locale: 'en', strength: 2 } }
 );
 
