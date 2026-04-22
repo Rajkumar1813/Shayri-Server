@@ -348,7 +348,7 @@ app.get('/api/reset-password/:token', async (req, res) => {
           <input type="password" id="np" placeholder="Min 6 characters">
 
           <label>Confirm Password</label>
-          <input type="password" id="cp" placeholder="Dobara daalo">
+          <input type="password" id="cp" placeholder="Min 6 characters">
 
           <button id="btn" onclick="resetPass()">Reset Password</button>
           <p id="msg"></p>
